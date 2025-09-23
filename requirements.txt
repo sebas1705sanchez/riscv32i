@@ -1,1 +1,2 @@
+sly
 pytest>=8.2
