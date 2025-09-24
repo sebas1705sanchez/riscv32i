@@ -91,10 +91,11 @@ def _is_imm(obj: Operand) -> bool:
     return isinstance(obj, Imm)
 
 def _base_sym(name: str) -> Tuple[str, Optional[str]]:
+    # FIX: longitud correcta del sufijo = 9
     if name.endswith("@pcrel_hi"):
-        return (name[:-10], "hi")
+        return (name[:-9], "hi")
     if name.endswith("@pcrel_lo"):
-        return (name[:-10], "lo")
+        return (name[:-9], "lo")
     return (name, None)
 
 # ---------------- Codificador principal ----------------
@@ -120,7 +121,6 @@ def encode(
         return num & 0xFFF
 
     def _imm20_signed(num: int, *, line:int, col:int) -> int:
-        # U-type permite bit 31 como signo; aceptamos 20 bits con signo
         if not is_signed_nbit(num, 20):
             diags.append(error("Inmediato de 20 bits (U-type) fuera de rango (±2^19)", line=line, col=col))
         return num & 0xFFFFF
@@ -134,14 +134,13 @@ def encode(
                 return 0
             return addr - cur_pc
         elif isinstance(op, Imm):
-            # Numérico: se interpreta como relativo ya dado (bytes)
+            # Numérico: relativo ya dado (bytes)
             return op.value
         else:
             diags.append(error("Operando de branch inválido (se esperaba símbolo o inmediato)", line=line, col=col))
             return 0
 
     def _resolve_j_offset(op: Operand, cur_pc: int, *, line:int, col:int) -> int:
-        # mismas reglas que branch
         return _resolve_branch_offset(op, cur_pc, line=line, col=col)
 
     def _resolve_pcrel_hi(imm: Operand, cur_pc: int, *, line:int, col:int) -> Tuple[str, int]:
@@ -154,7 +153,7 @@ def encode(
             diags.append(error(f"Etiqueta no definida: {name}", line=line, col=col))
             addr = 0
         rel = addr - cur_pc
-        hi20 = (rel + 0x800) >> 12  # redondeo para que el low12 quede en rango
+        hi20 = (rel + 0x800) >> 12  # redondeo para que low12 quede en rango
         return name, hi20
 
     def _resolve_pcrel_lo(imm: Operand, rd: Reg, *, line:int, col:int) -> int:
@@ -164,7 +163,7 @@ def encode(
             diags.append(error("Se esperaba símbolo @pcrel_lo", line=line, col=col))
         ctx = last_auipc.get((rd.num, name))
         if ctx is None:
-            # Fallback: usar PC actual (menos preciso); avisar
+            # Fallback: usar PC actual; avisar
             diags.append(warning(f"No se encontró AUIPC previo para {name}@pcrel_lo; usando PC actual", line=line, col=col))
             addr = symtab.get(name, 0)
             rel = addr - pc
@@ -226,11 +225,8 @@ def encode(
         if isinstance(n, Directive):
             if n.name in (".text", ".data"):
                 section = n.name
-                # NO reseteamos PC al reencontrar .text: es un LC acumulado en .text
-            # otras directivas no afectan
             continue
         if isinstance(n, Label):
-            # no cambia pc; ya fue registrado en first_pass
             continue
         if not isinstance(n, Instruction):
             continue
@@ -259,12 +255,12 @@ def encode(
                 word = _pack_R(sp.funct7 or 0, rs2.num, rs1.num, sp.funct3 or 0, rd.num, sp.opcode)
 
         elif sp.itype == "I":
-            # Distinción: LOADS, ALU-imm, SHIFTS, JALR
+            # Loads
             if mnem in ("lb","lh","lw","lbu","lhu"):
                 word = _i_load(n, f3=sp.funct3 or 0, opc=sp.opcode)
 
+            # JALR
             elif mnem in ("jalr",):
-                # Formas aceptadas: jalr rd, rs1, imm  |  jalr rd, imm(rs1)  |  (pseudo ya expandida)
                 if len(n.operands) == 3 and isinstance(n.operands[0], Reg) and isinstance(n.operands[1], Reg) and isinstance(n.operands[2], (Imm, Sym)):
                     rd: Reg = n.operands[0]         # type: ignore[assignment]
                     rs1: Reg = n.operands[1]        # type: ignore[assignment]
@@ -287,6 +283,7 @@ def encode(
                 else:
                     diags.append(error("Forma de jalr inválida", line=n.line, col=n.col))
 
+            # Shifts
             elif mnem in ("slli","srli","srai"):
                 if len(n.operands) != 3:
                     diags.append(error(f"{mnem} espera rd, rs1, shamt", line=n.line, col=n.col))
@@ -303,17 +300,21 @@ def encode(
                 if rd and rs1:
                     word = _pack_I(imm12, rs1=rs1.num, f3=sp.funct3 or 0, rd=rd.num, opc=sp.opcode)
 
+            # ALU immediates
             else:
-                # ALU immediates: addi/slti/sltiu/xori/ori/andi
                 if len(n.operands) != 3:
                     diags.append(error(f"{mnem} espera rd, rs1, imm", line=n.line, col=n.col))
                 rd = _get_reg(n.operands[0], line=n.line, col=n.col)
                 rs1 = _get_reg(n.operands[1], line=n.line, col=n.col)
-                if not isinstance(n.operands[2], Imm):
+                immop = n.operands[2]
+                # FIX: aceptar sym@pcrel_lo para addi (patrón de 'la')
+                if isinstance(immop, Imm):
+                    imm12 = _imm12(immop.value, line=n.line, col=n.col)
+                elif isinstance(immop, Sym) and mnem == "addi" and rd is not None:
+                    imm12 = _resolve_pcrel_lo(immop, rd, line=n.line, col=n.col)
+                else:
                     diags.append(error("Inmediato debe ser numérico (12 bits con signo)", line=n.line, col=n.col))
                     imm12 = 0
-                else:
-                    imm12 = _imm12(n.operands[2].value, line=n.line, col=n.col)
                 if rd and rs1:
                     word = _pack_I(imm12, rs1=rs1.num, f3=sp.funct3 or 0, rd=rd.num, opc=sp.opcode)
 
@@ -363,7 +364,6 @@ def encode(
                 word = _pack_J(off, rd=rd.num, opc=sp.opcode, line=n.line, col=n.col, diags=diags)
 
         elif sp.itype == "SYS":
-            # ecall/ebreak son formas sin operandos
             if mnem == "ecall":
                 word = _pack_I(0, rs1=0, f3=0, rd=0, opc=sp.opcode)
             elif mnem == "ebreak":
@@ -372,8 +372,6 @@ def encode(
                 diags.append(error("Instrucción SYSTEM no soportada", line=n.line, col=n.col))
 
         elif sp.itype == "FENCE":
-            # fence: I-type con rd=rs1=0, funct3 según spec (000 para fence, 001 para fence.i)
-            # Por defecto en 'fence' usamos pred=succ=0xF (IORW,IORW) si no hay operando.
             if mnem == "fence":
                 imm = 0x0F | (0x0F << 4)  # succ=0xF, pred=0xF, fm=0
                 if len(n.operands) == 1 and isinstance(n.operands[0], Imm):
