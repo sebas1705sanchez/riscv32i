@@ -139,10 +139,12 @@ def parse(text: str, *, filename: Optional[str] = None) -> Tuple[List[Union[Labe
             ops = split_operands(op_str)
             for tok in ops:
                 tok_s = tok.strip()
-                # memoria imm(rs1) o (rs1)
                 if '(' in tok_s and tok_s.endswith(')'):
                     try:
                         operands.append(_parse_mem(tok_s))
+                        continue
+                    except ValueError as e:
+                        diags.append(error(str(e), line=lineno, file=filename))
                         continue
                     except Exception:
                         diags.append(error(f"Operando inválido: '{tok_s}'", line=lineno, file=filename))

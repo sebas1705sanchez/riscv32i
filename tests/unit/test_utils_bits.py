@@ -1,5 +1,11 @@
 from src.rv32i_asm.utils import u32, sign_extend, is_unsigned_nbit, is_signed_nbit, to_bin32, to_hex32, split_bits
 
+def test_split_bits():
+    x = 0b1101_0010
+    # fields: [7:5]=110, [3:1]=010
+    assert split_bits(x, ((7,5),(3,1))) == (6, 1)
+
+
 def test_u32_and_formats():
     assert u32(-1) == 0xFFFFFFFF
     assert to_bin32(1) == "0"*31 + "1"
@@ -20,7 +26,4 @@ def test_nbit_checks():
     assert not is_signed_nbit(2048, 12)
     assert not is_signed_nbit(-2049, 12)
 
-def test_split_bits():
-    x = 0b1101_0010
-    # fields: [7:5]=110, [3:1]=010
-    assert split_bits(x, ((7,5),(3,1))) == (0b110, 0b010)
+

@@ -1,6 +1,14 @@
 from src.rv32i_asm.parser import parse
 from src.rv32i_asm.ast import Instruction, Label, Directive, Reg, Imm, Sym, Mem
 
+def test_errors_en_memoria_base_invalida():
+    bad = ".text\nlw x1, 4(foo)\n"   # 'foo' no es un registro válido
+    nodes, diags = parse(bad, filename="bad.s")
+    # esperamos al menos un diagnóstico de error
+    assert any(d.severity == "error" for d in diags)
+    # y que el mensaje refleje el problema de registro inválido
+    assert any("Registro inválido" in d.message for d in diags)
+
 def test_parse_simple_program():
     src = """
     .text
@@ -20,7 +28,11 @@ def test_parse_simple_program():
     assert isinstance(ins1.operands[2], Imm) and ins1.operands[2].value == 1
 
 def test_load_store_mem_operands():
-    src = ".text\n  lw a0, 0(sp)\n  sw ra, -8(s0)\n"
+    src = ("""
+    .text
+        lw a0, 0(sp)
+        sw ra, -8(s0)
+    """)
     nodes, diags = parse(src)
     assert not diags
     lw = nodes[1]; sw = nodes[2]
@@ -107,11 +119,5 @@ def test_parse_program_min():
     assert eqs[0].args[0] == "CONST"
     assert eqs[0].args[1] == 0x10
 
-def test_errors_en_memoria_base_invalida():
-    bad = ".text\nlw x1, 4(foo)\n"   # 'foo' no es un registro válido
-    nodes, diags = parse(bad, filename="bad.s")
-    # esperamos al menos un diagnóstico de error
-    assert any(d.severity == "error" for d in diags)
-    # y que el mensaje refleje el problema de registro inválido
-    assert any("Invalid register" in d.message for d in diags)
+
 
