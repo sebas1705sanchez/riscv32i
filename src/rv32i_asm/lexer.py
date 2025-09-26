@@ -1,6 +1,5 @@
 from __future__ import annotations
 import re
-from typing import Iterable
 
 COMMENT_SPLIT_RE = re.compile(r"(#|//)")
 
@@ -13,7 +12,7 @@ def strip_comment(line: str) -> str:
         return ""
     return m[0].strip()
 
-LABEL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$")
+LABEL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$")
 
 def split_label(line: str):
     """Return (label, rest) if line has 'label:', else (None, line)."""
